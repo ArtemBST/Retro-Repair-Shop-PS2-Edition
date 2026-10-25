@@ -11,6 +11,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install build tools
+        run: |
+          # Устанавливаем make (и другие базовые утилиты, если их нет)
+          apk add --no-cache make bash
+
       - name: Build project
         run: |
           export PS2DEV=/usr/local/ps2dev
