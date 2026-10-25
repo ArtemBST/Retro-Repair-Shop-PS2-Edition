@@ -3,12 +3,14 @@
 #include <sifrpc.h>
 #include <loadfile.h>
 #include <libpad.h>
-#include <debug.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <gsKit.h>
+#include <dmaKit.h>
+#include <gsToolkit.h>
 
-/* Структура консоли для ремонта — БЕЗ ИЗМЕНЕНИЙ */
+/* --- Структуры данных (без изменений) --- */
 typedef struct {
     int id;
     char name[32];
@@ -41,32 +43,53 @@ ConsoleLevel levels[18] = {
     {18, "PlayStation Vita", "Repair the graphics chip", 31, 20, 2, 100, 0}
 };
 
-const char *tool_names[3] = {
-    "[SCREWDRIVER]",
-    "[SOLDERING IRON]",
-    "[ALCOHOL BRUSH]"
-};
-
+const char *tool_names[3] = { "[SCREWDRIVER]", "[SOLDERING IRON]", "[ALCOHOL BRUSH]" };
 unsigned int qte_buttons[3] = {PAD_TRIANGLE, PAD_SQUARE, PAD_CIRCLE};
 const char *qte_names[3] = {"TRIANGLE", "SQUARE", "CIRCLE"};
 
-/* === Инициализация геймпада PS2 === */
-static char padBuf[256] __attribute__((aligned(64)));
+/* --- Глобальные переменные для gsKit --- */
+GSGLOBAL *gsGlobal;
+GSTEXTURE *fontTex;
+GSFONT *gsFont;
 
-int init_pad(void) {
-    int ret;
-    padInit(0);
-    ret = padPortOpen(0, 0, padBuf);
-    if (!ret) return 0;
-    return 1;
+/* Курсор для печати текста (эмуляция scr_printf) */
+int printX = 10;
+int printY = 10;
+
+void my_scr_clear(void) {
+    printX = 10;
+    printY = 10;
+    gsKit_clear(gsGlobal, GS_SETREG_RGBAQ(0,0,0,0x80,0x00));
 }
 
-/* Возвращает битовую маску нажатых кнопок (аналог pad.Buttons) */
+void my_scr_printf(const char *format, ...) {
+    char buffer[256];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+
+    for (int i = 0; buffer[i] != '\0'; i++) {
+        if (buffer[i] == '\n') {
+            printX = 10;
+            printY += gsFont->CharHeight;
+        } else {
+            gsKit_font_print(gsGlobal, gsFont, printX, printY, 1, 0x80808080, buffer[i]);
+            printX += gsFont->CharWidth;
+        }
+    }
+}
+
+/* --- Инициализация геймпада --- */
+static char padBuf[256] __attribute__((aligned(64)));
+int init_pad(void) {
+    padInit(0);
+    return padPortOpen(0, 0, padBuf);
+}
 unsigned int read_pad(void) {
     struct padButtonStatus buttons;
     unsigned int ret = 0;
     int state = padGetState(0, 0);
-
     if (state == PAD_STATE_STABLE || state == PAD_STATE_FINDCTP1) {
         if (padRead(0, 0, &buttons) != 0) {
             ret = 0xffff ^ buttons.btns;
@@ -74,8 +97,6 @@ unsigned int read_pad(void) {
     }
     return ret;
 }
-
-/* Возвращает X аналогового стика (0..255, центр 128) */
 int read_pad_lx(void) {
     struct padButtonStatus buttons;
     if (padRead(0, 0, &buttons) != 0) {
@@ -85,10 +106,40 @@ int read_pad_lx(void) {
 }
 
 int main(int argc, char *argv[]) {
-    /* Инициализация PS2 */
     SifInitRpc(0);
     SifLoadFileInit();
-    init_scr();
+
+    // Инициализация графики (gsKit)
+    gsGlobal = gsKit_init_global();
+    gsGlobal->Mode = GS_MODE_NTSC;
+    gsGlobal->Interlace = GS_INTERLACED;
+    gsGlobal->Field = GS_FIELD;
+    gsGlobal->Width = 640;
+    gsGlobal->Height = 448;
+    gsGlobal->PSM = GS_PSM_CT24;
+    gsGlobal->PSMZ = GS_PSMZ_16S;
+    gsGlobal->ZBuffering = GS_SETTING_OFF;
+    dmaKit_init(D_CTRL_RELE_OFF, D_CTRL_MFD_OFF, D_CTRL_STS_UNSPEC, D_CTRL_STD_OFF, D_CTRL_RCYC_8, 1 << DMA_CHANNEL_GIF);
+    dmaKit_chan_init(DMA_CHANNEL_GIF);
+    gsKit_init_screen(gsGlobal);
+
+    // ЗАГРУЗКА ШРИФТА (требуется файл font.raw в корне)
+    // ВАЖНО: Если файла нет, игра запустится, но текста не будет!
+    int font_fd = fioOpen("host:font.raw", O_RDONLY); 
+    if (font_fd >= 0) {
+        // Если используешь PCSX2 - host: работает
+        // Если на реальной приставке - замени на "mass:font.raw" (USB) или "mc0:/font.raw"
+    } else {
+        font_fd = fioOpen("mass:font.raw", O_RDONLY);
+    }
+    
+    if (font_fd >= 0) {
+        fontTex = gsKit_texture_fio(gsGlobal, "font.raw", NULL);
+        gsFont = gsKit_init_font(gsGlobal, fontTex);
+        gsKit_font_upload(gsGlobal, gsFont);
+        fioClose(font_fd);
+    }
+
     init_pad();
 
     int current_level = 0;
@@ -96,87 +147,82 @@ int main(int argc, char *argv[]) {
     int cursor_y = 10;
     int fix_progress = 0;
     unsigned int last_buttons = 0;
-
     int current_tool = 0;
     int money = 0;
     int is_sparking = 0;
     char spark_char = ' ';
-
     float solder_drift_x = 0.0f;
-
     int qte_active = 0;
     int qte_target_idx = 0;
     int qte_timer = 0;
 
     while (1) {
-        scr_clear();
-        scr_setXY(0, 0);
-        scr_printf("==================================================\n");
-        scr_printf("             RETRO REPAIR SHOP 2D  v3.0           \n");
-        scr_printf("==================================================\n\n");
-
-        ConsoleLevel *lvl = &levels[current_level];
-
-        scr_printf(" WALLET: $%d | LEVEL %d/18: %s\n", money, lvl->id, lvl->name);
-        scr_printf(" Issue: %s\n", lvl->issue);
-
-        scr_printf(" Active Tool: %s ", tool_names[current_tool]);
-        if (current_tool == lvl->req_tool) scr_printf("(CORRECT)\n");
-        else scr_printf("(WRONG TOOL!)\n");
-
         unsigned int buttons = read_pad();
         int lx = read_pad_lx();
 
+        my_scr_clear();
+        
+        my_scr_printf("==================================================\n");
+        my_scr_printf("             RETRO REPAIR SHOP 2D  v3.0           \n");
+        my_scr_printf("==================================================\n\n");
+
+        ConsoleLevel *lvl = &levels[current_level];
+
+        my_scr_printf(" WALLET: $%d | LEVEL %d/18: %s\n", money, lvl->id, lvl->name);
+        my_scr_printf(" Issue: %s\n", lvl->issue);
+        my_scr_printf(" Active Tool: %s ", tool_names[current_tool]);
+        
+        if (current_tool == lvl->req_tool) my_scr_printf("(CORRECT)\n");
+        else my_scr_printf("(WRONG TOOL!)\n");
+
         if ((buttons & PAD_CROSS) && current_tool == lvl->req_tool) {
             if (lvl->req_tool == 1) {
-                scr_printf(" [MINIGAME] KEEP SOLDER IN CENTER! ");
+                my_scr_printf(" [MINIGAME] KEEP SOLDER IN CENTER! ");
                 int offset_x = (int)solder_drift_x;
-                scr_printf("[");
+                my_scr_printf("[");
                 for(int i = -5; i <= 5; i++) {
-                    if (i == offset_x) scr_printf("O");
-                    else if (i == 0) scr_printf("|");
-                    else scr_printf(".");
+                    if (i == offset_x) my_scr_printf("O");
+                    else if (i == 0) my_scr_printf("|");
+                    else my_scr_printf(".");
                 }
-                scr_printf("]\n");
+                my_scr_printf("]\n");
             }
             else if (lvl->is_complex && qte_active) {
-                scr_printf(" [QTE EVENT] !! PRESS %s NOW !! (Time: %d)   \n",
-                           qte_names[qte_target_idx], qte_timer);
+                my_scr_printf(" [QTE EVENT] !! PRESS %s NOW !! (Time: %d)   \n", qte_names[qte_target_idx], qte_timer);
             }
-            else scr_printf("\n");
-        } else scr_printf("\n");
+            else my_scr_printf("\n");
+        } else my_scr_printf("\n");
 
-        scr_printf(" Fix Progress: [");
+        my_scr_printf(" Fix Progress: [");
         int bars = fix_progress / 10;
         for (int i = 0; i < 10; i++) {
-            if (i < bars) scr_printf("#");
-            else scr_printf(".");
+            if (i < bars) my_scr_printf("#");
+            else my_scr_printf(".");
         }
-        scr_printf("] %d%%\n\n", fix_progress);
+        my_scr_printf("] %d%%\n\n", fix_progress);
 
         is_sparking = 0;
         for (int y = 5; y < 18; y++) {
-            scr_printf("  ");
+            my_scr_printf("  ");
             for (int x = 5; x < 55; x++) {
-                if ((buttons & PAD_CROSS) && abs(cursor_x - lvl->repair_x) <= 2
-                    && abs(cursor_y - lvl->repair_y) <= 1) {
+                if ((buttons & PAD_CROSS) && abs(cursor_x - lvl->repair_x) <= 2 && abs(cursor_y - lvl->repair_y) <= 1) {
                     spark_char = (current_tool == lvl->req_tool) ? '*' : '~';
-                    if (abs(x - cursor_x) <= 2 && abs(y - cursor_y) <= 1 && (rand() % 3 == 0)) {
-                        is_sparking = 1;
-                    }
+                    if (abs(x - cursor_x) <= 2 && abs(y - cursor_y) <= 1 && (rand() % 3 == 0)) is_sparking = 1;
                 }
-
-                if (x == cursor_x && y == cursor_y) scr_printf("+");
-                else if (is_sparking && abs(x - cursor_x) <= 2 && abs(y - cursor_y) <= 1 && rand() % 2 == 0)
-                    scr_printf("%c", spark_char);
-                else if (x == lvl->repair_x && y == lvl->repair_y) scr_printf("X");
-                else if (x >= 15 && x <= 45 && y >= 8 && y <= 16) scr_printf("=");
-                else scr_printf(" ");
+                if (x == cursor_x && y == cursor_y) my_scr_printf("+");
+                else if (is_sparking && abs(x - cursor_x) <= 2 && abs(y - cursor_y) <= 1 && rand() % 2 == 0) my_scr_printf("%c", spark_char);
+                else if (x == lvl->repair_x && y == lvl->repair_y) my_scr_printf("X");
+                else if (x >= 15 && x <= 45 && y >= 8 && y <= 16) my_scr_printf("=");
+                else my_scr_printf(" ");
             }
-            scr_printf("\n");
+            my_scr_printf("\n");
         }
 
-        scr_printf("\n Controls: D-Pad=Move | L1/R1=Tool | X=Repair (Hold) | START=Exit\n");
+        my_scr_printf("\n Controls: D-Pad=Move | L1/R1=Tool | X=Repair (Hold) | START=Exit\n");
+
+        // Отрисовка кадра
+        gsKit_queue_exec(gsGlobal);
+        gsKit_sync_flip(gsGlobal);
 
         unsigned int pressed = buttons & ~last_buttons;
         last_buttons = buttons;
@@ -207,41 +253,27 @@ int main(int argc, char *argv[]) {
                     }
                     else if (lvl->is_complex) {
                         if (!qte_active) {
-                            if (rand() % 15 == 0) {
-                                qte_active = 1;
-                                qte_target_idx = rand() % 3;
-                                qte_timer = 30;
-                            }
+                            if (rand() % 15 == 0) { qte_active = 1; qte_target_idx = rand() % 3; qte_timer = 30; }
                             fix_progress += 1;
                         } else {
                             qte_timer--;
-                            if (pressed & qte_buttons[qte_target_idx]) {
-                                fix_progress += 15;
-                                qte_active = 0;
-                            } else if (pressed & (PAD_TRIANGLE | PAD_SQUARE | PAD_CIRCLE)) {
-                                if (fix_progress > 5) fix_progress -= 5;
-                                qte_active = 0;
-                            } else if (qte_timer <= 0) {
-                                if (fix_progress > 8) fix_progress -= 8;
-                                qte_active = 0;
-                            }
+                            if (pressed & qte_buttons[qte_target_idx]) { fix_progress += 15; qte_active = 0; }
+                            else if (pressed & (PAD_TRIANGLE | PAD_SQUARE | PAD_CIRCLE)) { if (fix_progress > 5) fix_progress -= 5; qte_active = 0; }
+                            else if (qte_timer <= 0) { if (fix_progress > 8) fix_progress -= 8; qte_active = 0; }
                         }
                     }
                     else fix_progress += 2;
 
                     if (fix_progress >= 100) {
                         money += lvl->reward;
-                        fix_progress = 0;
-                        qte_active = 0;
-                        solder_drift_x = 0.0f;
-                        current_level++;
-
+                        fix_progress = 0; qte_active = 0; solder_drift_x = 0.0f; current_level++;
                         if (current_level >= 18) {
-                            scr_clear();
-                            scr_printf("\n\n  CONGRATULATIONS! YOU FIXED ALL CONSOLES!\n");
-                            scr_printf("  TOTAL EARNED: $%d\n", money);
-                            scr_printf("  YOU ARE THE ULTIMATE RETRO MASTER!\n");
-                            /* Пауза 5 сек через задержку */
+                            my_scr_clear();
+                            my_scr_printf("\n\n  CONGRATULATIONS! YOU FIXED ALL CONSOLES!\n");
+                            my_scr_printf("  TOTAL EARNED: $%d\n", money);
+                            my_scr_printf("  YOU ARE THE ULTIMATE RETRO MASTER!\n");
+                            gsKit_queue_exec(gsGlobal);
+                            gsKit_sync_flip(gsGlobal);
                             for (volatile int i = 0; i < 100000000; i++) {}
                             break;
                         }
@@ -254,10 +286,7 @@ int main(int argc, char *argv[]) {
         } else {
             qte_active = 0;
         }
-
-        /* Ограничитель ~30 FPS через простую задержку */
         for (volatile int i = 0; i < 1000000; i++) {}
     }
-
     return 0;
 }
