@@ -47,21 +47,6 @@ const char *tool_names[3] = {
     "[ALCOHOL BRUSH]"
 };
 
-/* === МАППИНГ КНОПОК PSP -> PS2 DualShock 2 === */
-/* PSP: TRIANGLE/SQUARE/CIRCLE/CROSS/UP/DOWN/LEFT/RIGHT/L/R/START */
-/* PS2: TRIANGLE/SQUARE/CIRCLE/CROSS/UP/DOWN/LEFT/RIGHT/L1/R1/START */
-#define PAD_TRIANGLE  PAD_TRIANGLE
-#define PAD_SQUARE    PAD_SQUARE
-#define PAD_CIRCLE    PAD_CIRCLE
-#define PAD_CROSS     PAD_CROSS
-#define PAD_UP        PAD_UP
-#define PAD_DOWN      PAD_DOWN
-#define PAD_LEFT      PAD_LEFT
-#define PAD_RIGHT     PAD_RIGHT
-#define PAD_L1        PAD_L1
-#define PAD_R1        PAD_R1
-#define PAD_START     PAD_START
-
 unsigned int qte_buttons[3] = {PAD_TRIANGLE, PAD_SQUARE, PAD_CIRCLE};
 const char *qte_names[3] = {"TRIANGLE", "SQUARE", "CIRCLE"};
 
