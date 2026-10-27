@@ -13,15 +13,13 @@ jobs:
 
       - name: Install build tools and gsKit
         run: |
-          # Устанавливаем make, bash и тулчейн
-          apk add --no-cache make bash wget
+          # Добавили git в список!
+          apk add --no-cache make bash wget git
           
-          # Вручную ставим gsKit (он не входит в базовый образ)
           export PS2DEV=/usr/local/ps2dev
           export PS2SDK=$PS2DEV/ps2sdk
           export PATH=$PATH:$PS2DEV/bin:$PS2DEV/ee/bin:$PS2SDK/bin
           
-          # Скачиваем исходники gsKit и устанавливаем их
           git clone https://github.com/ps2dev/gsKit.git /tmp/gsKit
           cd /tmp/gsKit && make && make install
 
@@ -31,10 +29,7 @@ jobs:
           export PS2SDK=$PS2DEV/ps2sdk
           export PATH=$PATH:$PS2DEV/bin:$PS2DEV/ee/bin:$PS2SDK/bin
           
-          # Создаем минимальный пустой шрифт (чтобы сборка не падала, если нет файла)
-          # Если он не нужен для компиляции, это не помешает. Эмулятор просто использует встроенный.
           touch font.raw
-          
           make
 
       - name: Upload ELF and Font
