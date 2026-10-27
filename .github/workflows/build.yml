@@ -11,14 +11,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install build tools
+        run: |
+          apk add --no-cache make bash wget
+
       - name: Build project
         run: |
           export PS2DEV=/usr/local/ps2dev
           export PS2SDK=$PS2DEV/ps2sdk
           export PATH=$PATH:$PS2DEV/bin:$PS2DEV/ee/bin:$PS2SDK/bin
           
-          # Скачиваем шрифт прямо с зеркала (с проверкой на ошибку)
-          wget https://raw.githubusercontent.com/ps2dev/ps2sdk/master/samples/gsKit/font/font.raw || echo "Шрифт не скачался"
+          # Скачиваем шрифт с проверенного зеркала
+          wget -O font.raw https://github.com/ps2dev/ps2sdk/raw/master/samples/gsKit/font/font.raw || wget -O font.raw https://raw.githubusercontent.com/ps2dev/ps2sdk/master/samples/gsKit/font/font.raw || echo "Шрифт не скачался"
           
           make
 
