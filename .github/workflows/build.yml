@@ -11,24 +11,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install build tools
-        run: |
-          # Устанавливаем make (и другие базовые утилиты, если их нет)
-          apk add --no-cache make bash
-
       - name: Build project
-  run: |
-    export PS2DEV=/usr/local/ps2dev
-    export PS2SDK=$PS2DEV/ps2sdk
-    export PATH=$PATH:$PS2DEV/bin:$PS2DEV/ee/bin:$PS2SDK/bin
-    
-    # Скачиваем шрифт прямо с зеркала
-    wget https://raw.githubusercontent.com/ps2dev/ps2sdk/master/samples/gsKit/font/font.raw || echo "Шрифт не скачался"
-    
-    make
+        run: |
+          export PS2DEV=/usr/local/ps2dev
+          export PS2SDK=$PS2DEV/ps2sdk
+          export PATH=$PATH:$PS2DEV/bin:$PS2DEV/ee/bin:$PS2SDK/bin
+          
+          # Скачиваем шрифт прямо с зеркала (с проверкой на ошибку)
+          wget https://raw.githubusercontent.com/ps2dev/ps2sdk/master/samples/gsKit/font/font.raw || echo "Шрифт не скачался"
+          
+          make
 
-      - name: Upload ELF
+      - name: Upload ELF and Font
         uses: actions/upload-artifact@v4
         with:
-          name: RetroRepairShop.elf
-          path: RetroRepairShop.elf
+          name: PS2-Game-Build
+          path: |
+            RetroRepairShop.elf
+            font.raw
