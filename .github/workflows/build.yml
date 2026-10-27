@@ -13,15 +13,20 @@ jobs:
 
       - name: Install build tools and gsKit
         run: |
-          # Добавили git в список!
-          apk add --no-cache make bash wget git
+          # Добавили cmake и patch для сборки gsKit
+          apk add --no-cache make bash wget git cmake patch
           
           export PS2DEV=/usr/local/ps2dev
           export PS2SDK=$PS2DEV/ps2sdk
           export PATH=$PATH:$PS2DEV/bin:$PS2DEV/ee/bin:$PS2SDK/bin
           
+          # Скачиваем и собираем gsKit через cmake
           git clone https://github.com/ps2dev/gsKit.git /tmp/gsKit
-          cd /tmp/gsKit && make && make install
+          cd /tmp/gsKit
+          mkdir build && cd build
+          cmake .. -DCMAKE_TOOLCHAIN_FILE=$PS2SDK/ps2dev.cmake -DCMAKE_INSTALL_PREFIX=$PS2DEV/ps2sdk/ports
+          make
+          make install
 
       - name: Build project
         run: |
@@ -29,7 +34,9 @@ jobs:
           export PS2SDK=$PS2DEV/ps2sdk
           export PATH=$PATH:$PS2DEV/bin:$PS2DEV/ee/bin:$PS2SDK/bin
           
+          # Создаем пустой файл шрифта (чтобы не было ошибки), если его нет в репо
           touch font.raw
+          
           make
 
       - name: Upload ELF and Font
